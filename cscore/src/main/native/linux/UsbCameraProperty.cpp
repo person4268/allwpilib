@@ -4,6 +4,8 @@
 
 #include "UsbCameraProperty.h"
 
+#include <sys/utsname.h>
+
 #include <fmt/format.h>
 #include <wpi/SmallString.h>
 #include <wpi/StringExtras.h>
@@ -128,6 +130,36 @@ static std::string_view NormalizeName(std::string_view name,
   return {buf.data(), buf.size()};
 }
 
+// Maps control names to others as sometimes the names differ
+static std::string_view MapName(std::string_view name) {
+  // The exposure property names have changed with 5.16, this fixes kernels
+  // older than 5.16.
+
+  struct utsname info;
+  uname(&info);
+  int major, minor, patch;
+  std::sscanf(info.release, "%d.%d.%d", &major, &minor, &patch);
+  bool olderThan516 = (major < 5) || (major == 5 && minor < 16);
+
+  // temporarily just maps 5.16 names to 5.15 instead of the reverse for
+  // testing.
+  if (!olderThan516) {
+    if (name == "auto_exposure") {
+      return "exposure_auto";
+    }
+
+    if (name == "exposure_absolute") {
+      return "exposure_time_absolute";
+    }
+
+    if (name == "white_balance_temperature_auto") {
+      return "white_balance_automatic";
+    }
+  }
+
+  return name;
+}
+
 #ifdef VIDIOC_QUERY_EXT_CTRL
 UsbCameraProperty::UsbCameraProperty(const struct v4l2_query_ext_ctrl& ctrl)
     : PropertyImpl({}, CS_PROP_NONE, ctrl.step, ctrl.default_value, 0),
@@ -168,6 +200,7 @@ UsbCameraProperty::UsbCameraProperty(const struct v4l2_query_ext_ctrl& ctrl)
   }
   wpi::SmallString<64> name_buf;
   name = NormalizeName({ctrl.name, len}, name_buf);
+  name = MapName({ctrl.name, len});
 }
 #endif
 
@@ -208,6 +241,7 @@ UsbCameraProperty::UsbCameraProperty(const struct v4l2_queryctrl& ctrl)
   wpi::SmallString<64> name_buf;
   name =
       NormalizeName({reinterpret_cast<const char*>(ctrl.name), len}, name_buf);
+  name = MapName({reinterpret_cast<const char*>(ctrl.name), len});
 }
 
 std::unique_ptr<UsbCameraProperty> UsbCameraProperty::DeviceQuery(int fd,
